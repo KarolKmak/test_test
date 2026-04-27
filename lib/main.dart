@@ -53,12 +53,13 @@ class _NotificationTesterState extends State<NotificationTester> {
   @override
   void initState() {
     super.initState();
-    _requestPermission();
+    _initMessaging();
   }
 
-  Future<void> _requestPermission() async {
+  Future<void> _initMessaging() async {
     FirebaseMessaging messaging = FirebaseMessaging.instance;
 
+    // 1. Request Permission
     NotificationSettings settings = await messaging.requestPermission(
       alert: true,
       badge: true,
@@ -66,6 +67,7 @@ class _NotificationTesterState extends State<NotificationTester> {
     );
 
     if (settings.authorizationStatus == AuthorizationStatus.authorized) {
+      // 2. Get Token
       String? token = await messaging.getToken(
         vapidKey: "BF2SnAcL-3kXg6KTjm7lclrpmj8T11L8ShuK1WVLb0mXvPHlxR_x985pjYIUIJKVfi-krY0YwYsaAUAm6FSrZ9U",
       );
@@ -74,6 +76,26 @@ class _NotificationTesterState extends State<NotificationTester> {
       });
       print('Token: $token');
     }
+
+    // 3. Handle Foreground Messages (app is open)
+    FirebaseMessaging.onMessage.listen((RemoteMessage message) {
+      print('Got a message whilst in the foreground!');
+      if (message.notification != null) {
+        showDialog(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: Text(message.notification!.title ?? 'Notification'),
+            content: Text(message.notification!.body ?? ''),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('OK'),
+              ),
+            ],
+          ),
+        );
+      }
+    });
   }
 
   Future<void> _scheduleNotification() async {
@@ -87,14 +109,14 @@ class _NotificationTesterState extends State<NotificationTester> {
     setState(() => _isLoading = true);
 
     try {
-      // Points to the Cloudflare Pages Function at /schedule
+      // Points to the Cloudflare Pages Function at /API/schedule
       final url = Uri.parse('/API/schedule');
       final response = await http.post(
         url,
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
           'token': _token,
-          'scheduledTime': _selectedDate.toIso8601String(),
+          'scheduledTime': _selectedDate.toUtc().toIso8601String(), // Convert to UTC
           'title': 'Test Notification',
           'body': 'This is your scheduled test notification!',
         }),
@@ -152,7 +174,13 @@ class _NotificationTesterState extends State<NotificationTester> {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             if (_token == null)
-              const Text('Requesting permission and token...', style: TextStyle(color: Colors.orange))
+              const Column(
+                children: [
+                  CircularProgressIndicator(),
+                  SizedBox(height: 10),
+                  Text('Requesting permission and token...', style: TextStyle(color: Colors.orange)),
+                ],
+              )
             else
               const Text('FCM Token Ready ✅', style: TextStyle(color: Colors.green)),
             const SizedBox(height: 30),
