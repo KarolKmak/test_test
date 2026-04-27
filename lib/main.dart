@@ -7,12 +7,13 @@ import 'dart:convert';
 
 // Replace with your Firebase configuration
 const firebaseOptions = FirebaseOptions(
-  apiKey: "YOUR_API_KEY",
-  appId: "YOUR_APP_ID",
-  messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
-  projectId: "YOUR_PROJECT_ID",
-  authDomain: "YOUR_AUTH_DOMAIN",
-  storageBucket: "YOUR_STORAGE_BUCKET",
+  apiKey: "AIzaSyApS-zhVhYU0WGoSe6B30UjzSouJEWJX3Q",
+  appId: "1:780751184961:web:3ef7d56e07bbef9ede12c0",
+  messagingSenderId: "780751184961",
+  projectId: "test-e45d6",
+  authDomain: "test-e45d6.firebaseapp.com",
+  storageBucket: "test-e45d6.firebasestorage.app",
+  measurementId: "G-GKZHK101K9",
 );
 
 void main() async {
@@ -66,7 +67,7 @@ class _NotificationTesterState extends State<NotificationTester> {
 
     if (settings.authorizationStatus == AuthorizationStatus.authorized) {
       String? token = await messaging.getToken(
-        vapidKey: "YOUR_VAPID_KEY", 
+        vapidKey: "BF2SnAcL-3kXg6KTjm7lclrpmj8T11L8ShuK1WVLb0mXvPHlxR_x985pjYIUIJKVfi-krY0YwYsaAUAm6FSrZ9U",
       );
       setState(() {
         _token = token;
