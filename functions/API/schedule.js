@@ -1,55 +1,121 @@
 export async function onRequestPost(context) {
   const { request, env } = context;
   const data = await request.json();
-
-  const { token, scheduledTime, title, body } = data;
-
-  // Since Cloudflare Pages Functions don't have built-in "wait until" for long durations
-  // (like days), for a simple test we check if the time is "nowish".
-  // In a real production app, you'd store this in KV/D1 and use a Cron Trigger
-  // to poll and send. For this test, we'll send it immediately via FCM.
+  const { token, title, body } = data;
 
   try {
-    const fcmResponse = await sendFcm(env, {
-      token,
-      title,
-      body
-    });
+    const accessToken = await getAccessToken(
+      env.FCM_CLIENT_EMAIL,
+      env.FCM_PRIVATE_KEY
+    );
 
-    return new Response(JSON.stringify({ success: true, detail: fcmResponse }), {
-      headers: { 'Content-Type': 'application/json' }
+    const fcmResponse = await fetch(
+      `https://fcm.googleapis.com/v1/projects/${env.FCM_PROJECT_ID}/messages:send`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({
+          message: {
+            token: token,
+            notification: {
+              title: title,
+              body: body,
+            },
+            webpush: {
+              fcm_options: {
+                link: '/',
+              },
+            },
+          },
+        }),
+      }
+    );
+
+    const result = await fcmResponse.json();
+    return new Response(JSON.stringify(result), {
+      headers: {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*'
+      },
     });
   } catch (e) {
-    return new Response(JSON.stringify({ success: false, error: e.message }), {
+    return new Response(JSON.stringify({ error: e.message }), {
       status: 500,
-      headers: { 'Content-Type': 'application/json' }
+      headers: {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*'
+      },
     });
   }
 }
 
-async function sendFcm(env, payload) {
-  const { token, title, body } = payload;
+async function getAccessToken(email, privateKey) {
+  const now = Math.floor(Date.now() / 1000);
+  const expiry = now + 3600;
 
-  // NOTE: This uses the Legacy FCM API for simplicity in a "simple app"
-  // because HTTP v1 requires complex OAuth2 JWT signing which is hard in a single JS file.
-  // Ensure you have "Cloud Messaging API (Legacy)" enabled in Firebase Console.
+  const header = { alg: 'RS256', typ: 'JWT' };
+  const payload = {
+    iss: email,
+    scope: 'https://www.googleapis.com/auth/firebase.messaging',
+    aud: 'https://oauth2.googleapis.com/token',
+    exp: expiry,
+    iat: now,
+  };
 
-  const response = await fetch('https://fcm.googleapis.com/fcm/send', {
+  const encodedHeader = b64(JSON.stringify(header));
+  const encodedPayload = b64(JSON.stringify(payload));
+  const unsignedJwt = `${encodedHeader}.${encodedPayload}`;
+
+  const buffer = str2ab(unsignedJwt);
+  const rawKey = pemToBinary(privateKey);
+
+  const cryptoKey = await crypto.subtle.importKey(
+    'pkcs8',
+    rawKey,
+    { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
+    false,
+    ['sign']
+  );
+
+  const signature = await crypto.subtle.sign(
+    'RSASSA-PKCS1-v1_5',
+    cryptoKey,
+    buffer
+  );
+
+  const signedJwt = `${unsignedJwt}.${b64ab(signature)}`;
+
+  const res = await fetch('https://oauth2.googleapis.com/token', {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `key=${env.FCM_SERVER_KEY}`,
-    },
-    body: JSON.stringify({
-      to: token,
-      notification: {
-        title: title,
-        body: body,
-        click_action: "FLUTTER_NOTIFICATION_CLICK",
-      },
-      priority: 'high',
-    }),
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: `grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&assertion=${signedJwt}`,
   });
 
-  return await response.json();
+  const tokenRes = await res.json();
+  if (tokenRes.error) throw new Error(tokenRes.error_description || tokenRes.error);
+  return tokenRes.access_token;
+}
+
+function b64(str) {
+  return btoa(str).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+function b64ab(ab) {
+  return b64(String.fromCharCode(...new Uint8Array(ab)));
+}
+
+function str2ab(str) {
+  return new TextEncoder().encode(str);
+}
+
+function pemToBinary(pem) {
+  const base64 = pem
+    .replace(/-----BEGIN PRIVATE KEY-----/, '')
+    .replace(/-----END PRIVATE KEY-----/, '')
+    .replace(/\\n/g, '')
+    .replace(/\s/g, '');
+  return Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
 }
