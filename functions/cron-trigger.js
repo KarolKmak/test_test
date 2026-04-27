@@ -1,49 +1,54 @@
 export default {
+  // 1. This runs on the Cron schedule (every minute)
   async scheduled(event, env, ctx) {
-    console.log("Cron trigger started at:", new Date().toISOString());
-    const now = Date.now();
+    await processNotifications(env);
+  },
 
-    // 1. List all notifications in KV
-    const list = await env.NOTIFICATIONS_KV.list({ prefix: "notif:" });
-    console.log(`Found ${list.keys.length} total keys in KV`);
-
-    for (const item of list.keys) {
-      // Key format: notif:timestamp:id
-      const parts = item.name.split(':');
-      if (parts.length < 2) continue;
-
-      const timestamp = parseInt(parts[1]);
-
-      // 2. Check if it's time to send
-      if (timestamp <= now) {
-        console.log(`Processing due notification: ${item.name}`);
-        const dataStr = await env.NOTIFICATIONS_KV.get(item.name);
-
-        if (dataStr) {
-          const data = JSON.parse(dataStr);
-
-          try {
-            // 3. Send via FCM
-            const result = await sendFcm(env, data);
-            console.log(`FCM Send result for ${item.name}:`, JSON.stringify(result));
-
-            // 4. Delete from KV after successful send
-            await env.NOTIFICATIONS_KV.delete(item.name);
-            console.log(`Deleted ${item.name} from KV`);
-          } catch (e) {
-            console.error(`Failed to send ${item.name}:`, e.message);
-          }
-        }
-      } else {
-        console.log(`Notification ${item.name} is scheduled for later: ${new Date(timestamp).toISOString()}`);
-      }
-    }
+  // 2. This allows you to test it MANUALLY by visiting the Worker URL
+  async fetch(request, env, ctx) {
+    const results = await processNotifications(env);
+    return new Response(JSON.stringify({
+      message: "Manual check complete",
+      time_utc: new Date().toISOString(),
+      results
+    }), {
+      headers: { "Content-Type": "application/json" }
+    });
   }
 };
 
+async function processNotifications(env) {
+  const now = Date.now();
+  const list = await env.NOTIFICATIONS_KV.list({ prefix: "notif:" });
+  const log = [];
+
+  for (const item of list.keys) {
+    const parts = item.name.split(':');
+    if (parts.length < 2) continue;
+
+    const timestamp = parseInt(parts[1]);
+
+    if (timestamp <= now) {
+      const dataStr = await env.NOTIFICATIONS_KV.get(item.name);
+      if (dataStr) {
+        const data = JSON.parse(dataStr);
+        try {
+          const result = await sendFcm(env, data);
+          await env.NOTIFICATIONS_KV.delete(item.name);
+          log.push(`SENT: ${data.title} to ${data.token.substring(0, 10)}... Result: ${JSON.stringify(result)}`);
+        } catch (e) {
+          log.push(`FAILED ${item.name}: ${e.message}`);
+        }
+      }
+    } else {
+      log.push(`SKIPPED: Not due yet. Due in ${Math.round((timestamp - now) / 60000)} mins`);
+    }
+  }
+  return log;
+}
+
 async function sendFcm(env, data) {
   const accessToken = await getAccessToken(env);
-
   const response = await fetch(`https://fcm.googleapis.com/v1/projects/${env.FCM_PROJECT_ID}/messages:send`, {
     method: 'POST',
     headers: {
@@ -53,32 +58,20 @@ async function sendFcm(env, data) {
     body: JSON.stringify({
       message: {
         token: data.token,
-        notification: {
-          title: data.title,
-          body: data.body,
-        },
-        webpush: {
-          fcm_options: {
-            link: '/',
-          },
-        },
+        notification: { title: data.title, body: data.body },
+        webpush: { fcm_options: { link: '/' } },
       },
     }),
   });
-
   return await response.json();
 }
 
 async function getAccessToken(env) {
-  const email = env.FCM_CLIENT_EMAIL;
-  const privateKey = env.FCM_PRIVATE_KEY;
-
   const now = Math.floor(Date.now() / 1000);
   const expiry = now + 3600;
-
   const header = { alg: 'RS256', typ: 'JWT' };
   const payload = {
-    iss: email,
+    iss: env.FCM_CLIENT_EMAIL,
     scope: 'https://www.googleapis.com/auth/firebase.messaging',
     aud: 'https://oauth2.googleapis.com/token',
     exp: expiry,
@@ -88,31 +81,13 @@ async function getAccessToken(env) {
   const encodedHeader = b64(JSON.stringify(header));
   const encodedPayload = b64(JSON.stringify(payload));
   const unsignedJwt = `${encodedHeader}.${encodedPayload}`;
-
   const buffer = new TextEncoder().encode(unsignedJwt);
 
-  // Robust PEM to Binary conversion
-  const base64Key = privateKey
-    .replace(/-----BEGIN PRIVATE KEY-----/, '')
-    .replace(/-----END PRIVATE KEY-----/, '')
-    .replace(/\\n/g, '')
-    .replace(/\s/g, '');
+  const base64Key = env.FCM_PRIVATE_KEY.replace(/-----BEGIN PRIVATE KEY-----/, '').replace(/-----END PRIVATE KEY-----/, '').replace(/\\n/g, '').replace(/\s/g, '');
   const rawKey = Uint8Array.from(atob(base64Key), (c) => c.charCodeAt(0));
 
-  const cryptoKey = await crypto.subtle.importKey(
-    'pkcs8',
-    rawKey,
-    { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
-    false,
-    ['sign']
-  );
-
-  const signature = await crypto.subtle.sign(
-    'RSASSA-PKCS1-v1_5',
-    cryptoKey,
-    buffer
-  );
-
+  const cryptoKey = await crypto.subtle.importKey('pkcs8', rawKey, { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, false, ['sign']);
+  const signature = await crypto.subtle.sign('RSASSA-PKCS1-v1_5', cryptoKey, buffer);
   const signedJwt = `${unsignedJwt}.${b64ab(signature)}`;
 
   const res = await fetch('https://oauth2.googleapis.com/token', {
@@ -126,10 +101,5 @@ async function getAccessToken(env) {
   return tokenRes.access_token;
 }
 
-function b64(str) {
-  return btoa(str).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-}
-
-function b64ab(ab) {
-  return b64(String.fromCharCode(...new Uint8Array(ab)));
-}
+function b64(str) { return btoa(str).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); }
+function b64ab(ab) { return b64(String.fromCharCode(...new Uint8Array(ab))); }
