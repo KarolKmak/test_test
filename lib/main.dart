@@ -88,7 +88,7 @@ class _NotificationTesterState extends State<NotificationTester> {
 
     try {
       // Points to the Cloudflare Pages Function at /schedule
-      final url = Uri.parse('/schedule');
+      final url = Uri.parse('/API/schedule');
       final response = await http.post(
         url,
         headers: {'Content-Type': 'application/json'},
