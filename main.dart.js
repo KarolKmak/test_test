@@ -83873,7 +83873,7 @@ return A.T(p.gLn().uW(!0,!1,!0,!1,!1,!1,!1,!0),$async$rJ)
 case 4:s=b.c===B.fi?2:3
 break
 case 2:s=5
-return A.T(p.gLn().fW("YOUR_VAPID_KEY"),$async$rJ)
+return A.T(p.gLn().fW("BF2SnAcL-3kXg6KTjm7lclrpmj8T11L8ShuK1WVLb0mXvPHlxR_x985pjYIUIJKVfi-krY0YwYsaAUAm6FSrZ9U"),$async$rJ)
 case 5:o=b
 q.ab(new A.ajo(q,o))
 A.Gf("Token: "+A.k(o))
@@ -83885,7 +83885,7 @@ s=p}while(true)switch(s){case 0:if(m.d==null){m.c.aa(t.Pu).f.B9(B.O4)
 s=1
 break}m.ab(new A.ajp(m))
 p=4
-l=A.hF("/schedule")
+l=A.hF("/API/schedule")
 i=t.N
 h=A.ah(["Content-Type","application/json"],i,i)
 s=7
@@ -87667,7 +87667,7 @@ B.di=new A.o7(0,"none")
 B.EJ=new A.o7(1,"low")
 B.fY=new A.o7(2,"medium")
 B.jx=new A.o7(3,"high")
-B.EK=new A.rc("YOUR_API_KEY","YOUR_APP_ID","YOUR_MESSAGING_SENDER_ID","YOUR_PROJECT_ID","YOUR_AUTH_DOMAIN",null,"YOUR_STORAGE_BUCKET",null,null,null,null,null,null,null)
+B.EK=new A.rc("AIzaSyApS-zhVhYU0WGoSe6B30UjzSouJEWJX3Q","1:780751184961:web:3ef7d56e07bbef9ede12c0","780751184961","test-e45d6","test-e45d6.firebaseapp.com",null,"test-e45d6.firebasestorage.app","G-GKZHK101K9",null,null,null,null,null,null)
 B.en=new A.IF(1,"loose")
 B.NU=new A.h0(null,38,null,null)
 B.EL=new A.k_(1,B.en,B.NU,null)
