@@ -53,31 +53,12 @@ class _NotificationTesterState extends State<NotificationTester> {
   @override
   void initState() {
     super.initState();
-    _initMessaging();
+    // On iOS, we cannot request permission automatically on init.
+    // It must be triggered by a user gesture (button click).
+    _setupForegroundListener();
   }
 
-  Future<void> _initMessaging() async {
-    FirebaseMessaging messaging = FirebaseMessaging.instance;
-
-    // 1. Request Permission
-    NotificationSettings settings = await messaging.requestPermission(
-      alert: true,
-      badge: true,
-      sound: true,
-    );
-
-    if (settings.authorizationStatus == AuthorizationStatus.authorized) {
-      // 2. Get Token
-      String? token = await messaging.getToken(
-        vapidKey: "BF2SnAcL-3kXg6KTjm7lclrpmj8T11L8ShuK1WVLb0mXvPHlxR_x985pjYIUIJKVfi-krY0YwYsaAUAm6FSrZ9U",
-      );
-      setState(() {
-        _token = token;
-      });
-      print('Token: $token');
-    }
-
-    // 3. Handle Foreground Messages (app is open)
+  void _setupForegroundListener() {
     FirebaseMessaging.onMessage.listen((RemoteMessage message) {
       print('Got a message whilst in the foreground!');
       if (message.notification != null) {
@@ -98,25 +79,53 @@ class _NotificationTesterState extends State<NotificationTester> {
     });
   }
 
-  Future<void> _scheduleNotification() async {
-    if (_token == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Wait for FCM token...')),
+  Future<void> _requestPermissionAndGetToken() async {
+    setState(() => _isLoading = true);
+    try {
+      FirebaseMessaging messaging = FirebaseMessaging.instance;
+
+      // iOS PWA requires a user gesture for this call
+      NotificationSettings settings = await messaging.requestPermission(
+        alert: true,
+        badge: true,
+        sound: true,
       );
-      return;
+
+      if (settings.authorizationStatus == AuthorizationStatus.authorized) {
+        String? token = await messaging.getToken(
+          vapidKey: "BF2SnAcL-3kXg6KTjm7lclrpmj8T11L8ShuK1WVLb0mXvPHlxR_x985pjYIUIJKVfi-krY0YwYsaAUAm6FSrZ9U",
+        );
+        setState(() {
+          _token = token;
+        });
+        print('Token: $token');
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Permission denied by user')),
+        );
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error getting token: $e')),
+      );
+    } finally {
+      setState(() => _isLoading = false);
     }
+  }
+
+  Future<void> _scheduleNotification() async {
+    if (_token == null) return;
 
     setState(() => _isLoading = true);
 
     try {
-      // Points to the Cloudflare Pages Function at /API/schedule
       final url = Uri.parse('/API/schedule');
       final response = await http.post(
         url,
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
           'token': _token,
-          'scheduledTime': _selectedDate.toUtc().toIso8601String(), // Convert to UTC
+          'scheduledTime': _selectedDate.toUtc().toIso8601String(),
           'title': 'Test Notification',
           'body': 'This is your scheduled test notification!',
         }),
@@ -173,42 +182,58 @@ class _NotificationTesterState extends State<NotificationTester> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            if (_token == null)
-              const Column(
-                children: [
-                  CircularProgressIndicator(),
-                  SizedBox(height: 10),
-                  Text('Requesting permission and token...', style: TextStyle(color: Colors.orange)),
-                ],
-              )
-            else
-              const Text('FCM Token Ready ✅', style: TextStyle(color: Colors.green)),
-            const SizedBox(height: 30),
-            Text('Scheduled For:', style: Theme.of(context).textTheme.titleMedium),
-            Text(
-              DateFormat('yyyy-MM-dd HH:mm').format(_selectedDate),
-              style: Theme.of(context).textTheme.headlineMedium,
-            ),
-            ElevatedButton(
-              onPressed: _pickDateTime,
-              child: const Text('Change Date/Time'),
-            ),
-            const SizedBox(height: 40),
-            _isLoading
-                ? const CircularProgressIndicator()
-                : ElevatedButton(
-                    onPressed: _scheduleNotification,
-                    style: ElevatedButton.styleFrom(
-                      minimumSize: const Size(double.infinity, 50),
+            if (_token == null) ...[
+              const Icon(Icons.notifications_paused, size: 64, color: Colors.orange),
+              const SizedBox(height: 10),
+              const Text(
+                'Permission Required',
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+              ),
+              const Text(
+                'On iOS, you must click the button below to allow notifications.',
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 20),
+              ElevatedButton.icon(
+                onPressed: _isLoading ? null : _requestPermissionAndGetToken,
+                icon: const Icon(Icons.notifications_active),
+                label: const Text('Enable Notifications'),
+                style: ElevatedButton.styleFrom(backgroundColor: Colors.orange.shade100),
+              ),
+            ] else ...[
+              const Icon(Icons.check_circle, size: 64, color: Colors.green),
+              const SizedBox(height: 10),
+              const Text('Notifications Ready ✅', style: TextStyle(color: Colors.green, fontSize: 18)),
+              const SizedBox(height: 30),
+              Text('Scheduled For:', style: Theme.of(context).textTheme.titleMedium),
+              Text(
+                DateFormat('yyyy-MM-dd HH:mm').format(_selectedDate),
+                style: Theme.of(context).textTheme.headlineMedium,
+              ),
+              TextButton(
+                onPressed: _pickDateTime,
+                child: const Text('Change Date/Time'),
+              ),
+              const SizedBox(height: 40),
+              _isLoading
+                  ? const CircularProgressIndicator()
+                  : ElevatedButton(
+                      onPressed: _scheduleNotification,
+                      style: ElevatedButton.styleFrom(
+                        minimumSize: const Size(double.infinity, 50),
+                      ),
+                      child: const Text('Schedule Push Notification'),
                     ),
-                    child: const Text('Schedule Push Notification'),
-                  ),
-            const SizedBox(height: 20),
+            ],
+            const SizedBox(height: 40),
+            const Divider(),
             const Text(
-              'Note: On iOS, you MUST "Add to Home Screen" for push notifications to work.',
-              textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 12, fontStyle: FontStyle.italic),
+              'iOS Requirements:',
+              style: TextStyle(fontWeight: FontWeight.bold),
             ),
+            const Text('1. iPhone must be updated to iOS 16.4+'),
+            const Text('2. Tap Share -> "Add to Home Screen"'),
+            const Text('3. Open the app FROM the home screen'),
           ],
         ),
       ),
